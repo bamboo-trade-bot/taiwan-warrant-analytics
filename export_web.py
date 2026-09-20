@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 """把 SQLite 的計算結果匯出成網頁用的精簡 JSON。
 
-參考價優先採用造市商的買賣中價，那才是當下真正能成交的價格。但櫃買中心
-的 OpenAPI 不揭露買賣報價，上櫃權證一律沒有中價，因此退而採用收盤價，
-並用第 18 欄標記來源，讓網頁能誠實呈現這個差別。曾經因為要求「必須有
-中價」而把整個上櫃市場靜默排除掉，不要再犯。
+參考價優先採用造市商的買賣中價，那才是收盤當下真正能成交的價格。上市取自
+證交所每日收盤行情，上櫃因櫃買 OpenAPI 不揭露買賣報價，改由 mis.py 的盤後
+快照補齊；兩者都沒有時才退回收盤價，並用第 18 欄標記來源，讓網頁能誠實
+呈現這個差別。曾經因為要求「必須有中價」而把整個上櫃市場靜默排除掉，
+不要再犯。
 """
-import sqlite3, json, argparse, os, re
+import sqlite3, json, argparse, os, re, hashlib
 
 
 def rnd(x, n):
@@ -34,7 +35,7 @@ def export(db, trade_date, out):
            AND m.days_left >= 5
            AND q.underlying <> '' AND q.und_close IS NOT NULL
            AND COALESCE(m.mid, q.close) > 0
-           -- 櫃買中心不揭露買賣報價，上櫃權證的價差比永遠是 NULL，不能一併濾掉
+           -- 仍有部分權證連 MIS 也沒有報價，價差比是 NULL，不能被這個條件一併濾掉
            AND (m.spread_pct IS NULL OR m.spread_pct <= 1.0)
            AND m.iv BETWEEN 0.03 AND 3.0
     """, (trade_date,)).fetchall()
@@ -98,14 +99,20 @@ def export(db, trade_date, out):
     size = os.path.getsize(out) / 1024 / 1024
     print("輸出 %s：%d 檔權證 / %d 個標的 / %d 家券商 / %.2f MB"
           % (out, len(out_rows), len(und_list), len(issuers), size))
-    stamp_index(out, trade_date)
+    version = "%s-%s" % (trade_date.replace("-", ""),
+                         hashlib.sha1(body.encode("utf-8")).hexdigest()[:8])
+    stamp_index(out, version)
 
 
-def stamp_index(out, trade_date):
-    """把資料日期寫進 index.html 的 script src。
+def stamp_index(out, version):
+    """把資料版本寫進 index.html 的 script src。
 
     GitHub Pages 送出 Cache-Control: max-age=600，若不換網址，使用者可能拿到
-    新的 index.html 配上舊的 data.js，欄位會對不上。加上版本參數即可強制重抓。
+    新的 index.html 配上快取裡的舊 data.js，欄位對不上就會壞掉。
+
+    版本是「交易日 + 內容雜湊」而不是只有交易日：同一個交易日的資料也可能
+    重產（補了新的資料來源、或修了計算），只看日期的話戳記不會變，快取就
+    不會失效。
     """
     idx = os.path.join(os.path.dirname(out) or ".", "index.html")
     base = os.path.basename(out)
@@ -114,11 +121,11 @@ def stamp_index(out, trade_date):
     with open(idx, encoding="utf-8") as fh:
         html = fh.read()
     new = re.sub(r'src="' + re.escape(base) + r'(\?[^"]*)?"',
-                 'src="%s?d=%s"' % (base, trade_date.replace("-", "")), html)
+                 'src="%s?v=%s"' % (base, version), html)
     if new != html:
         with open(idx, "w", encoding="utf-8") as fh:
             fh.write(new)
-        print("已更新 %s 的資料版本戳記 -> %s" % (idx, trade_date.replace("-", "")))
+        print("已更新 %s 的資料版本戳記 -> %s" % (idx, version))
 
 
 if __name__ == "__main__":
