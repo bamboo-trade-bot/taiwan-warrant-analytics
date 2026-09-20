@@ -6,6 +6,5 @@ warrant.db
 warrant.db-wal
 warrant.db-shm
 
-# 網頁用資料，由 export_web.py 產生（單日約 2.9MB，每天重產不該進版控）
-site/data.js
-site/data.json
+# 中繼格式；網頁實際使用的是 docs/data.js
+docs/data.json

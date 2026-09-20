@@ -28,10 +28,19 @@ MI_INDEX 的六個權證分類代碼：`0999` 認購、`0999P` 認售、`0999C` 
 ```bash
 python main.py --date 20260918        # 抓資料 + 入庫 + 算指標，約 3 分鐘
 python main.py --date 20260918 --skip-fetch   # 只重算指標
-python export_web.py --out site/data.js       # 產生網頁用資料
+python export_web.py --out docs/data.js       # 產生網頁用資料
 ```
 
-`site/index.html` 是靜態頁面，和 `site/data.js` 放在一起就能直接開。
+`docs/index.html` 是靜態頁面，和 `docs/data.js` 放在一起就能直接開。
+
+## 線上版
+
+https://bamboo-trade-bot.github.io/taiwan-warrant-analytics/
+
+由 GitHub Pages 自 `main` 分支的 `docs/` 目錄提供。`docs/data.js` 是
+2026-09-18 收盤的單日快照，目前為手動更新——每天重產一次 2.9 MB 的檔案
+再提交，一年會讓 repo 長大約 1 GB，所以自動化應該走 GitHub Actions
+排程產生並部署，而不是把每日資料都存進版本歷史。
 
 ## 檔案
 
@@ -42,7 +51,7 @@ python export_web.py --out site/data.js       # 產生網頁用資料
 | `greeks.py` | Black-Scholes 定價、二分法反解 IV、Greeks |
 | `main.py` | 每日流程 |
 | `export_web.py` | 匯出網頁用的精簡資料 |
-| `site/index.html` | 篩選介面 |
+| `docs/index.html` | 篩選介面 |
 
 ## 計算上的幾個重點
 

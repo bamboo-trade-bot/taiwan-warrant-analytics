@@ -94,7 +94,8 @@ if __name__ == "__main__":
     ap.add_argument("--db", default="warrant.db")
     ap.add_argument("--date", default="2026-09-18")
     ap.add_argument("--basis", default="2026-09-19", help="warrant_basic 的快照日期")
-    ap.add_argument("--out", default="site/data.json")
+    ap.add_argument("--out", default="docs/data.js",
+                    help=".js 會包成 window.WARRANT_DATA；.json 則輸出純 JSON")
     a = ap.parse_args()
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
     export(a.db, a.date, a.basis, a.out)
