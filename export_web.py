@@ -6,7 +6,7 @@
 並用第 18 欄標記來源，讓網頁能誠實呈現這個差別。曾經因為要求「必須有
 中價」而把整個上櫃市場靜默排除掉，不要再犯。
 """
-import sqlite3, json, argparse, os
+import sqlite3, json, argparse, os, re
 
 
 def rnd(x, n):
@@ -98,6 +98,27 @@ def export(db, trade_date, out):
     size = os.path.getsize(out) / 1024 / 1024
     print("輸出 %s：%d 檔權證 / %d 個標的 / %d 家券商 / %.2f MB"
           % (out, len(out_rows), len(und_list), len(issuers), size))
+    stamp_index(out, trade_date)
+
+
+def stamp_index(out, trade_date):
+    """把資料日期寫進 index.html 的 script src。
+
+    GitHub Pages 送出 Cache-Control: max-age=600，若不換網址，使用者可能拿到
+    新的 index.html 配上舊的 data.js，欄位會對不上。加上版本參數即可強制重抓。
+    """
+    idx = os.path.join(os.path.dirname(out) or ".", "index.html")
+    base = os.path.basename(out)
+    if not os.path.exists(idx):
+        return
+    with open(idx, encoding="utf-8") as fh:
+        html = fh.read()
+    new = re.sub(r'src="' + re.escape(base) + r'(\?[^"]*)?"',
+                 'src="%s?d=%s"' % (base, trade_date.replace("-", "")), html)
+    if new != html:
+        with open(idx, "w", encoding="utf-8") as fh:
+            fh.write(new)
+        print("已更新 %s 的資料版本戳記 -> %s" % (idx, trade_date.replace("-", "")))
 
 
 if __name__ == "__main__":
