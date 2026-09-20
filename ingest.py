@@ -2,6 +2,7 @@
 """權證資料擷取：證交所(上市) + 櫃買(上櫃)。純標準函式庫，無外部相依。"""
 import json, gzip, sqlite3, time, os, datetime
 import urllib.request
+import notes as notes_mod
 
 UA = "Mozilla/5.0 (warrant-analytics/1.0)"
 TWSE_OPENAPI = "https://openapi.twse.com.tw/v1"
@@ -109,6 +110,10 @@ def twse_basic():
     for r in rows:
         issued = num(r.get("發行單位數量(仟單位)"))
         ratio_k = num(r.get("最新標的履約配發數量(每仟單位權證)"))
+        note = (r.get("備註") or "").strip()[:2000]
+        # 必須在寫入前就解析好。若留到事後用 UPDATE 補，去重比對時
+        # 「已補」的舊列和「未補」的新列永遠不相等，去重就失效了。
+        out_units, out_src = notes_mod.outstanding(note, issued)
         out.append(dict(
             snapshot_date=roc_to_ad(r.get("出表日期")),
             code=(r.get("權證代號") or "").strip(),
@@ -128,10 +133,11 @@ def twse_basic():
             cap_price=num(r.get("最新上限價格(元)/上限指數")) or None,
             floor_price=num(r.get("最新下限價格(元)/下限指數")) or None,
             issued_units=issued,
-            cancelled=None,
-            outstanding=None,
+            cancelled=None if out_units is None else (issued - out_units),
+            outstanding=out_units,
+            outstanding_src=out_src,
             settle_type=(r.get("結算方式(詳附註編號說明)") or "").strip(),
-            note=(r.get("備註") or "").strip()[:2000],
+            note=note,
         ))
     return out
 
@@ -169,6 +175,7 @@ def tpex_basic():
             issued_units=total or None,
             cancelled=cancel,
             outstanding=(total - cancel) if total else None,
+            outstanding_src="TPEX" if total else None,
             settle_type=None,
             note=None,
         ))
@@ -261,6 +268,7 @@ def migrate(con):
     """
     wanted = {
         "warrant_quote": [("quote_src", "TEXT")],
+        "warrant_basic": [("outstanding_src", "TEXT")],
     }
     for table, cols in wanted.items():
         have = set(r[1] for r in con.execute("PRAGMA table_info(%s)" % table))
@@ -304,6 +312,23 @@ def upsert_basic(con, rows):
     changed = [r for r in rows if prev.get(r["code"]) != tuple(r[c] for c in cmp_cols)]
     upsert(con, "warrant_basic", changed)
     return (len(changed), len(rows) - len(changed))
+
+
+def upsert_adjustments(con, rows):
+    """把備註解析出的除權息調整存成時間軸，回傳寫入筆數。
+
+    交易所只提供「最新」履約價。要算某檔三個月前的隱含波動率，就必須知道
+    當時的履約價，這張表就是為了回答那個問題。
+    """
+    data = []
+    for r in rows:
+        for d, kind, strike, ratio in notes_mod.adjustments(r.get("note")):
+            data.append((r["code"], d, kind, strike, ratio))
+    if data:
+        con.executemany("INSERT OR REPLACE INTO warrant_adjustment "
+                        "(code, adj_date, kind, strike, ratio) VALUES (?,?,?,?,?)", data)
+        con.commit()
+    return len(data)
 
 
 def underlying_map(con):

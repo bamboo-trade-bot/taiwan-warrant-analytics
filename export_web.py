@@ -23,7 +23,7 @@ def export(db, trade_date, out):
                m.code, b.name, m.days_left, b.strike, b.ratio,
                COALESCE(m.mid, q.close) AS price, m.mid,
                m.iv, m.delta, m.leverage, m.premium_pct, m.spread_pct,
-               q.volume, b.outstanding, b.market, b.maturity
+               q.volume, b.outstanding, b.issued_units, b.market, b.maturity
           FROM warrant_metric m
           JOIN warrant_quote q USING (trade_date, code)
           JOIN warrant_basic b ON b.code = m.code AND b.snapshot_date = COALESCE(
@@ -42,7 +42,7 @@ def export(db, trade_date, out):
 
     issuers, unds, out_rows = [], {}, []
     for (und, und_close, und_nm, issuer, kind, code, name, days, strike, ratio,
-         price, mid, iv, delta, lev, prem, spread, vol, outstanding,
+         price, mid, iv, delta, lev, prem, spread, vol, outstanding, issued,
          market, maturity) in rows:
         issuer = issuer or "其他"
         if issuer not in issuers:
@@ -69,6 +69,8 @@ def export(db, trade_date, out):
             0 if market == "TSE" else 1,        # 16 市場別
             maturity,                           # 17 到期日
             0 if mid is not None else 1,        # 18 參考價來源：0 買賣中價、1 收盤價
+            None if (outstanding is None or not issued)   # 19 剩餘比例＝流通在外/發行量
+                 else rnd(outstanding / issued, 3),
         ])
 
     # 標的依權證檔數排序，選單上方先出現主流標的

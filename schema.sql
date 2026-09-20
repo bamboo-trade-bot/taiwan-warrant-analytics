@@ -60,6 +60,18 @@ CREATE TABLE IF NOT EXISTS warrant_metric (
     PRIMARY KEY (trade_date, code)
 );
 
+-- 履約價與行使比例的異動時間軸，由備註欄解析而來。
+-- 交易所只給「最新」的履約價，要算歷史隱波就得知道當時的值。
+CREATE TABLE IF NOT EXISTS warrant_adjustment (
+    code      TEXT NOT NULL,
+    adj_date  TEXT NOT NULL,     -- 除權息生效日
+    kind      TEXT,              -- 除權 / 除息 / 除權、息
+    strike    REAL,              -- 調整後履約價
+    ratio     REAL,              -- 調整後行使比例
+    PRIMARY KEY (code, adj_date)
+);
+
+CREATE INDEX IF NOT EXISTS ix_adj_code ON warrant_adjustment(code, adj_date);
 CREATE INDEX IF NOT EXISTS ix_basic_code ON warrant_basic(code);
 CREATE INDEX IF NOT EXISTS ix_basic_und  ON warrant_basic(underlying, snapshot_date);
 CREATE INDEX IF NOT EXISTS ix_quote_und  ON warrant_quote(underlying, trade_date);

@@ -31,6 +31,10 @@ def ingest_all(con, date_str):
             r["underlying"] = umap.get(r["code"])
     n, same = ingest.upsert_basic(con, basic)
     print("  上市基本資料 %6d 筆異動（%d 筆未變動，略過）" % (n, same))
+    filled = sum(1 for r in basic if r["outstanding"] is not None)
+    print("    備註解析：流通在外補上 %d/%d 檔（%.1f%%）"
+          % (filled, len(basic), 100.0 * filled / max(len(basic), 1)))
+    print("    備註解析：履約價調整時間軸 %d 筆" % ingest.upsert_adjustments(con, basic))
     n, same = ingest.upsert_basic(con, ingest.tpex_basic())
     print("  上櫃基本資料 %6d 筆異動（%d 筆未變動，略過）" % (n, same))
 
