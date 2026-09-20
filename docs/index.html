@@ -127,6 +127,11 @@ input[type=number]{font-family:var(--mono);font-variant-numeric:tabular-nums}
 .rangerow{display:flex;align-items:center;gap:9px}
 input[type=range]{flex:1;accent-color:var(--gold);min-width:0}
 .rangeval{font-family:var(--mono);font-size:12px;color:var(--text);min-width:44px;text-align:right;font-variant-numeric:tabular-nums}
+.hint{margin:6px 0 0;font-size:11px;color:var(--muted);line-height:1.45}
+.src{
+  font-family:var(--sans);font-size:9.5px;color:var(--muted);
+  border:1px solid var(--line);border-radius:2px;padding:0 2px;margin-left:4px;vertical-align:1px;
+}
 .reset{
   width:100%;margin-top:4px;border:1px solid var(--line);background:transparent;
   color:var(--text-2);font-family:var(--sans);font-size:12.5px;padding:7px;border-radius:6px;cursor:pointer;
@@ -208,7 +213,7 @@ footer a{color:var(--gold)}
       <div class="stat"><b id="s-total">—</b><span>可交易權證</span></div>
       <div class="stat"><b id="s-und">—</b><span>標的檔數</span></div>
       <div class="stat"><b id="s-iv">—</b><span>全市場隱波中位數</span></div>
-      <div class="stat"><b id="s-spread">—</b><span>價差比中位數</span></div>
+      <div class="stat"><b id="s-spread">—</b><span>價差比中位數（限上市）</span></div>
     </div>
   </div>
 </header>
@@ -229,6 +234,15 @@ footer a{color:var(--gold)}
         <button type="button" data-v="-1">全部</button>
         <button type="button" data-v="0">認購</button>
         <button type="button" data-v="1">認售</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>市場</label>
+      <div class="seg" id="f-mkt" role="group" aria-label="市場">
+        <button type="button" data-v="-1">全部</button>
+        <button type="button" data-v="0">上市</button>
+        <button type="button" data-v="1">上櫃</button>
       </div>
     </div>
 
@@ -258,6 +272,7 @@ footer a{color:var(--gold)}
         <input type="range" id="f-spread" min="1" max="60" step="1">
         <span class="rangeval" id="f-spread-v">—</span>
       </div>
+      <p class="hint">上櫃權證無此資料，不受本條件影響</p>
     </div>
 
     <div class="field">
@@ -301,7 +316,7 @@ footer a{color:var(--gold)}
             <th data-k="days">剩餘天</th>
             <th data-k="strike">履約價</th>
             <th data-k="money">價內外</th>
-            <th data-k="mid">中價</th>
+            <th data-k="mid">參考價</th>
             <th data-k="iv">隱含波動率 ／ 相對</th>
             <th data-k="delta">Delta</th>
             <th data-k="lev">實質槓桿</th>
@@ -318,7 +333,8 @@ footer a{color:var(--gold)}
 </main>
 
 <footer>
-  <p><b>資料來源</b>：臺灣證券交易所「上市權證基本資料彙總表」與每日收盤行情、證券櫃檯買賣中心權證 OpenAPI。隱含波動率與 Greeks 非交易所提供，為以買賣中價（造市商真實報價）反解 Black-Scholes 計算，無風險利率取 1.6%、股利率取 0。</p>
+  <p><b>資料來源</b>：臺灣證券交易所「上市權證基本資料彙總表」與每日收盤行情、證券櫃檯買賣中心權證 OpenAPI。隱含波動率與 Greeks 非交易所提供，為反解 Black-Scholes 計算，無風險利率取 1.6%、股利率取 0。</p>
+  <p><b>參考價的兩種來源</b>：上市權證優先採用造市商的買賣中價，那是當下真正能成交的價格。櫃買中心的 OpenAPI 不揭露買賣報價，所以上櫃權證（列上標示「櫃」）一律改用當日收盤價推算，標示「收」；少數上市權證當天沒有造市報價時亦同。收盤價可能是數小時前的成交，據此算出的隱波時效性較差，價差比也無從計算，表格顯示「—」，並且不受左側價差比條件過濾。</p>
   <p>已排除牛證、熊證與上下限型權證——那是障礙式選擇權，用 Black-Scholes 計價會系統性高估。當天沒有造市報價、價差比超過 100% 或隱波超過 300% 的權證亦不列入。</p>
   <p>本頁為資料分析工具，不構成投資建議。權證為高槓桿商品，時間價值每日遞減，到期可能全額損失。</p>
 </footer>
@@ -329,12 +345,13 @@ footer a{color:var(--gold)}
   "use strict";
   var D = window.WARRANT_DATA;
   var ROWS = D.rows, UNDS = D.unds, ISSUERS = D.issuers;
-  // row: 0和 1券商 2方向 3代號 4簡稱 5天數 6履約價 7行使比例 8中價
-  //      9隱波 10Delta 11槓桿 12溢價比 13價差比 14成交張 15流通在外 16市場 17到期日
+  // row: 0標的 1券商 2方向 3代號 4簡稱 5天數 6履約價 7行使比例 8參考價
+  //      9隱波 10Delta 11槓桿 12溢價比 13價差比 14成交張 15流通在外
+  //      16市場(0上市/1上櫃) 17到期日 18參考價來源(0中價/1收盤價)
   var U_CODE=0,U_NAME=1,U_CLOSE=2,U_N=3;
   var MAX_SHOW = 200;
 
-  var DEFAULTS = {und:"2330", kind:0, money:"all", dmin:20, dmax:120,
+  var DEFAULTS = {und:"2330", kind:0, mkt:-1, money:"all", dmin:20, dmax:120,
                   spread:10, vol:0, iss:[], sort:"iv", dir:1};
   var st = Object.assign({}, DEFAULTS);
   st.iss = [];
@@ -374,7 +391,9 @@ footer a{color:var(--gold)}
     document.getElementById("s-total").textContent = ROWS.length.toLocaleString();
     document.getElementById("s-und").textContent = UNDS.length.toLocaleString();
     document.getElementById("s-iv").textContent = fmtPct(median(ROWS.map(function(r){return r[9];})));
-    document.getElementById("s-spread").textContent = fmtPct(median(ROWS.map(function(r){return r[13];})));
+    var spreads = [];
+    ROWS.forEach(function(r){ if(r[13] != null) spreads.push(r[13]); });
+    document.getElementById("s-spread").textContent = fmtPct(median(spreads));
   })();
 
   /* ---------------- 篩選 ---------------- */
@@ -391,8 +410,10 @@ footer a{color:var(--gold)}
       if(undIdx === -2) break;
       if(undIdx >= 0 && r[0] !== undIdx) continue;
       if(st.kind >= 0 && r[2] !== st.kind) continue;
+      if(st.mkt >= 0 && r[16] !== st.mkt) continue;
       if(r[5] < st.dmin || r[5] > st.dmax) continue;
-      if(r[13] > st.spread/100) continue;
+      // 上櫃權證的價差比是 null（櫃買不揭露買賣報價），不受這個條件限制
+      if(r[13] != null && r[13] > st.spread/100) continue;
       if(r[14] < st.vol) continue;
       if(issSet && issSet.indexOf(r[1]) < 0) continue;
       if(st.money !== "all"){
@@ -464,7 +485,9 @@ footer a{color:var(--gold)}
       '<td class="num">'+r[5]+'</td>'+
       '<td class="num">'+fmtNum(r[6],2)+'</td>'+
       '<td class="num">'+(m==null?"—":((m-1>=0?"+":"")+((m-1)*100).toFixed(1)+"%"))+'</td>'+
-      '<td class="num">'+fmtNum(r[8],2)+'</td>'+
+      '<td class="num">'+fmtNum(r[8],2)+
+        (r[18]===1 ? '<span class="src" title="當日無造市商買賣報價，改用收盤價推算">收</span>' : '')+
+      '</td>'+
       '<td><span class="ivcell"><span class="ivnum">'+fmtPct(r[9])+'</span>'+devHTML+'</span></td>'+
       '<td class="num">'+fmtNum(r[10],4)+'</td>'+
       '<td class="num">'+fmtNum(r[11],2)+'</td>'+
@@ -502,6 +525,10 @@ footer a{color:var(--gold)}
     var get = SORTERS[st.sort];
     list.sort(function(a,b){
       var x = get(a), y = get(b);
+      // 沒有資料的欄位（例如上櫃的價差比）一律排在最後，不論升冪降冪
+      if(x == null && y == null) return 0;
+      if(x == null) return 1;
+      if(y == null) return -1;
       if(x === y) return 0;
       return (x > y ? 1 : -1) * st.dir;
     });
@@ -541,6 +568,8 @@ footer a{color:var(--gold)}
     document.getElementById("f-vol").value = st.vol;
     var kb = document.querySelectorAll("#f-kind button");
     for(var i=0;i<kb.length;i++) kb[i].setAttribute("aria-pressed", String(+kb[i].dataset.v === st.kind));
+    var mb = document.querySelectorAll("#f-mkt button");
+    for(var m=0;m<mb.length;m++) mb[m].setAttribute("aria-pressed", String(+mb[m].dataset.v === st.mkt));
     var ib = document.querySelectorAll("#f-iss button");
     for(var j=0;j<ib.length;j++) ib[j].setAttribute("aria-pressed", String(st.iss.indexOf(+ib[j].dataset.i) >= 0));
   }
@@ -567,6 +596,10 @@ footer a{color:var(--gold)}
   document.getElementById("f-kind").addEventListener("click", function(e){
     var b = e.target.closest("button"); if(!b) return;
     st.kind = +b.dataset.v; syncControls(); render();
+  });
+  document.getElementById("f-mkt").addEventListener("click", function(e){
+    var b = e.target.closest("button"); if(!b) return;
+    st.mkt = +b.dataset.v; syncControls(); render();
   });
   document.getElementById("f-iss").addEventListener("click", function(e){
     var b = e.target.closest("button"); if(!b) return;

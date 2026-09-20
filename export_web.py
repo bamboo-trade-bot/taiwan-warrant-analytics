@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """把 SQLite 的計算結果匯出成網頁用的精簡 JSON。
 
-只輸出「造市商當天有掛買賣報價」的權證 —— 沒有報價的權證買不到，
-放進篩選器只會製造假選項。
+參考價優先採用造市商的買賣中價，那才是當下真正能成交的價格。但櫃買中心
+的 OpenAPI 不揭露買賣報價，上櫃權證一律沒有中價，因此退而採用收盤價，
+並用第 18 欄標記來源，讓網頁能誠實呈現這個差別。曾經因為要求「必須有
+中價」而把整個上櫃市場靜默排除掉，不要再犯。
 """
 import sqlite3, json, argparse, os
 
@@ -11,28 +13,36 @@ def rnd(x, n):
     return None if x is None else round(x, n)
 
 
-def export(db, trade_date, basis_date, out):
+def export(db, trade_date, out):
     con = sqlite3.connect(db)
+    # 上市與上櫃的基本資料出表日不同（證交所可能晚一天），所以不能寫死單一
+    # 快照日期，必須逐檔取「交易日當下已知」的那一份，和 main.py 的規則一致。
     rows = con.execute("""
         SELECT q.underlying, q.und_close, b.underlying_nm, b.issuer, b.kind,
                m.code, b.name, m.days_left, b.strike, b.ratio,
-               m.mid, m.iv, m.delta, m.leverage, m.premium_pct, m.spread_pct,
+               COALESCE(m.mid, q.close) AS price, m.mid,
+               m.iv, m.delta, m.leverage, m.premium_pct, m.spread_pct,
                q.volume, b.outstanding, b.market, b.maturity
           FROM warrant_metric m
           JOIN warrant_quote q USING (trade_date, code)
-          JOIN warrant_basic b ON b.code = m.code AND b.snapshot_date = ?
+          JOIN warrant_basic b ON b.code = m.code AND b.snapshot_date = COALESCE(
+                (SELECT MAX(snapshot_date) FROM warrant_basic
+                  WHERE code = m.code AND snapshot_date <= m.trade_date),
+                (SELECT MIN(snapshot_date) FROM warrant_basic WHERE code = m.code))
          WHERE m.trade_date = ?
-           AND m.iv IS NOT NULL AND m.mid IS NOT NULL AND m.mid > 0
+           AND m.iv IS NOT NULL
            AND m.days_left >= 5
            AND q.underlying <> '' AND q.und_close IS NOT NULL
-           -- 剔除明顯失真的報價：價差比破 100%、IV 破 300%，多半是單邊掛單
-           AND m.spread_pct <= 1.0
+           AND COALESCE(m.mid, q.close) > 0
+           -- 櫃買中心不揭露買賣報價，上櫃權證的價差比永遠是 NULL，不能一併濾掉
+           AND (m.spread_pct IS NULL OR m.spread_pct <= 1.0)
            AND m.iv BETWEEN 0.03 AND 3.0
-    """, (basis_date, trade_date)).fetchall()
+    """, (trade_date,)).fetchall()
 
     issuers, unds, out_rows = [], {}, []
     for (und, und_close, und_nm, issuer, kind, code, name, days, strike, ratio,
-         mid, iv, delta, lev, prem, spread, vol, outstanding, market, maturity) in rows:
+         price, mid, iv, delta, lev, prem, spread, vol, outstanding,
+         market, maturity) in rows:
         issuer = issuer or "其他"
         if issuer not in issuers:
             issuers.append(issuer)
@@ -47,7 +57,7 @@ def export(db, trade_date, basis_date, out):
             days,                               # 5 剩餘天數
             rnd(strike, 2),                     # 6 履約價
             rnd(ratio, 5),                      # 7 行使比例
-            rnd(mid, 2),                        # 8 買賣中價
+            rnd(price, 2),                      # 8 參考價（中價，無中價時用收盤價）
             rnd(iv, 4),                         # 9 隱含波動率
             rnd(delta, 5),                      # 10 Delta
             rnd(lev, 2),                        # 11 實質槓桿
@@ -57,6 +67,7 @@ def export(db, trade_date, basis_date, out):
             None if outstanding is None else int(outstanding),   # 15 流通在外
             0 if market == "TSE" else 1,        # 16 市場別
             maturity,                           # 17 到期日
+            0 if mid is not None else 1,        # 18 參考價來源：0 買賣中價、1 收盤價
         ])
 
     # 標的依權證檔數排序，選單上方先出現主流標的
@@ -93,9 +104,8 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default="warrant.db")
     ap.add_argument("--date", default="2026-09-18")
-    ap.add_argument("--basis", default="2026-09-19", help="warrant_basic 的快照日期")
     ap.add_argument("--out", default="docs/data.js",
                     help=".js 會包成 window.WARRANT_DATA；.json 則輸出純 JSON")
     a = ap.parse_args()
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
-    export(a.db, a.date, a.basis, a.out)
+    export(a.db, a.date, a.out)
