@@ -26,10 +26,14 @@ MI_INDEX 的六個權證分類代碼：`0999` 認購、`0999P` 認售、`0999C` 
 只需要 Python 3.10+，沒有任何外部套件（純標準函式庫）。
 
 ```bash
-python main.py --date 20260918        # 抓資料 + 入庫 + 算指標，約 3 分鐘
+python main.py                          # 自動抓最近一個交易日，約 3 分鐘
+python main.py --date 20260918          # 指定交易日
 python main.py --date 20260918 --skip-fetch   # 只重算指標
-python export_web.py --out docs/data.js       # 產生網頁用資料
+python export_web.py --out docs/data.js # 產生網頁資料（省略 --date 用庫裡最新那天）
 ```
+
+省略 `--date` 時會從今天往回探，找到第一個有權證收盤行情的日子。週末、
+國定假日、或執行時間早於資料上線，都會自動退到正確的交易日。
 
 `docs/index.html` 是靜態頁面，和 `docs/data.js` 放在一起就能直接開。
 
@@ -37,10 +41,15 @@ python export_web.py --out docs/data.js       # 產生網頁用資料
 
 https://bamboo-trade-bot.github.io/taiwan-warrant-analytics/
 
-由 GitHub Pages 自 `main` 分支的 `docs/` 目錄提供。`docs/data.js` 是
-2026-09-18 收盤的單日快照，目前為手動更新——每天重產一次 2.9 MB 的檔案
-再提交，一年會讓 repo 長大約 1 GB，所以自動化應該走 GitHub Actions
-排程產生並部署，而不是把每日資料都存進版本歷史。
+由 `.github/workflows/daily.yml` 每個交易日台北時間 18:00 自動更新，
+也可以在 Actions 頁面手動觸發。
+
+流程是：從 release 取回累積的 `warrant.db` → 抓當日資料併入 → 產生
+`docs/data.js` → 部署到 Pages → 把資料庫存回 release。
+
+**資料庫和網頁資料都不進版控。** 兩者都是每天重產的衍生物，逐日提交
+一年會讓 repo 長好幾 GB。資料庫改存在固定 tag `warrant-db` 的 release
+裡，網頁資料則直接進 Pages 部署產物。repo 本身只留原始碼。
 
 ## 檔案
 
@@ -103,9 +112,15 @@ parse 才拿得到。富邦新一代 API 的 `intraday/ticker/{symbol}` 直接�
 300/min，只適合補「篩選結果那幾百檔」，不適合全市場掃描
 （`snapshot/quotes` 不支援權證）。
 
-歷史資料目前只有單日。`t187ap37_L` 與櫃買的發行資料都只有當日快照，沒有
-歷史；行情則可用 MI_INDEX 帶日期參數往回補。要追蹤「某家券商是不是一路
-把隱波往上調」，就得自己累積這段時序。
+交易所端沒有歷史：`t187ap37_L` 與櫃買的發行資料都只有當日快照。行情可用
+MI_INDEX 帶日期參數往回補，但基本資料補不回來，所以隱波的時序只能靠每日
+排程一天一天累積。要追蹤「某家券商是不是一路把隱波往上調」，就得等這份
+時序長出來。
+
+**資料庫會持續長大。** 基本資料已經做了異動去重（一天通常只有數百列，
+而非五萬列），但行情與指標每天各約 4.4 萬列，粗估每日增加 8 MB 左右。
+一年後會接近 GitHub release 單檔 2 GB 的上限，屆時需要改成分年切檔、
+或把久遠的每日行情彙總成週/月資料。
 
 ## 免責
 

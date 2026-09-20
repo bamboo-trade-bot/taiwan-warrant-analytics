@@ -124,9 +124,19 @@ def stamp_index(out, trade_date):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default="warrant.db")
-    ap.add_argument("--date", default="2026-09-18")
+    ap.add_argument("--date", default=None,
+                    help="交易日 YYYY-MM-DD，省略則用資料庫裡最新的一天")
     ap.add_argument("--out", default="docs/data.js",
                     help=".js 會包成 window.WARRANT_DATA；.json 則輸出純 JSON")
     a = ap.parse_args()
+    date = a.date
+    if not date:
+        con = sqlite3.connect(a.db)
+        row = con.execute("SELECT MAX(trade_date) FROM warrant_metric").fetchone()
+        con.close()
+        if not row or not row[0]:
+            raise SystemExit("資料庫裡還沒有任何指標，請先執行 main.py")
+        date = row[0]
+        print("採用資料庫中最新的交易日：%s" % date)
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
-    export(a.db, a.date, a.out)
+    export(a.db, date, a.out)

@@ -1,0 +1,67 @@
+name: 每日更新權證資料
+
+on:
+  schedule:
+    # UTC 10:00 = 台北 18:00，收盤後三個半小時，證交所資料已上線
+    - cron: "0 10 * * 1-5"
+  workflow_dispatch:          # 也可以在 Actions 頁面手動觸發
+
+permissions:
+  contents: write             # 上傳資料庫快照到 release
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # 資料庫不進版控（每天重產，一年會讓 repo 肥好幾 GB），
+      # 改用固定 tag 的 release 當儲存空間，讓歷史能一天一天累積。
+      - name: 取回累積的資料庫
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release download warrant-db --pattern warrant.db --clobber; then
+            echo "已取回既有資料庫：$(du -h warrant.db | cut -f1)"
+          else
+            echo "尚無既有資料庫，將建立新的"
+          fi
+
+      - name: 抓取並計算
+        run: python main.py
+
+      - name: 產生網頁資料
+        run: python export_web.py --out docs/data.js
+
+      - name: 保存資料庫
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view warrant-db >/dev/null 2>&1 || \
+            gh release create warrant-db \
+              --title "資料庫快照" \
+              --notes "由每日工作流程自動維護的 SQLite 資料庫，不是軟體發行版本。"
+          gh release upload warrant-db warrant.db --clobber
+          echo "資料庫已保存：$(du -h warrant.db | cut -f1)"
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+      - id: deploy
+        uses: actions/deploy-pages@v4

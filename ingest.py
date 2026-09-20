@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """權證資料擷取：證交所(上市) + 櫃買(上櫃)。純標準函式庫，無外部相依。"""
-import json, gzip, sqlite3, time, os
+import json, gzip, sqlite3, time, os, datetime
 import urllib.request
 
 UA = "Mozilla/5.0 (warrant-analytics/1.0)"
@@ -36,6 +36,26 @@ def fetch(url, tries=3, timeout=90):
             last = e
             time.sleep(2 * (i + 1))
     raise RuntimeError("fetch failed " + url + ": " + str(last))
+
+
+def latest_trading_date(max_back=10):
+    """從今天往回找最近一個有權證收盤行情的交易日，回傳 YYYYMMDD。
+
+    週末與國定假日沒有資料，排程跑在哪一天都能自己找到正確的交易日；
+    收盤資料當天稍晚才上線，執行太早也會自動退回前一個交易日。
+    """
+    d = datetime.date.today()
+    for _ in range(max_back):
+        s = d.strftime("%Y%m%d")
+        try:
+            r = fetch(TWSE_RWD + "?date=" + s + "&type=0999&response=json", tries=1)
+            for tbl in r.get("tables", []):
+                if tbl.get("data"):
+                    return s
+        except Exception:
+            pass
+        d -= datetime.timedelta(days=1)
+    return None
 
 
 def roc_to_ad(s):
@@ -243,14 +263,41 @@ def upsert(con, table, rows):
     return len(rows)
 
 
-def backfill_underlying(con):
-    """上市基本資料缺標的代號，用行情表的對應關係回填。"""
-    con.execute("""
-        UPDATE warrant_basic
-           SET underlying = (SELECT q.underlying FROM warrant_quote q
-                              WHERE q.code = warrant_basic.code
-                                AND q.underlying <> ''
-                              ORDER BY q.trade_date DESC LIMIT 1)
-         WHERE underlying IS NULL OR underlying = ''
-    """)
-    con.commit()
+def upsert_basic(con, rows):
+    """只在內容和該檔的上一份快照不同時才寫入新的一列。
+
+    權證基本資料每天有 5 萬列，但絕大多數逐日完全不變。全部照存，一年會
+    長到十幾 GB；只記錄異動則一天通常只有數百列。查詢語意完全不變——
+    「取小於等於交易日的最新一份快照」在稀疏快照下仍然正確。
+    """
+    if not rows:
+        return (0, 0)
+    cols = list(rows[0].keys())
+    cmp_cols = [c for c in cols if c != "snapshot_date"]
+    ci = cmp_cols.index("code")
+
+    prev = {}
+    sql = ("SELECT %s FROM warrant_basic b WHERE snapshot_date = "
+           "(SELECT MAX(snapshot_date) FROM warrant_basic WHERE code = b.code)"
+           % ",".join(cmp_cols))
+    for row in con.execute(sql):
+        prev[row[ci]] = row
+
+    changed = [r for r in rows if prev.get(r["code"]) != tuple(r[c] for c in cmp_cols)]
+    upsert(con, "warrant_basic", changed)
+    return (len(changed), len(rows) - len(changed))
+
+
+def underlying_map(con):
+    """從行情表取出每檔權證的標的代號。
+
+    證交所的基本資料表只給標的「名稱」不給代號，得靠行情表補。必須在寫入
+    基本資料之前就補好：若留到事後用 UPDATE 修改，下次比對時「已補」的舊
+    列和「未補」的新列永遠不相等，去重就整個失效。
+    """
+    return dict(con.execute("""
+        SELECT code, underlying FROM warrant_quote q
+         WHERE underlying <> ''
+           AND trade_date = (SELECT MAX(trade_date) FROM warrant_quote
+                              WHERE code = q.code AND underlying <> '')
+    """))

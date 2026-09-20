@@ -15,17 +15,23 @@ RISK_FREE = 0.016          # 台銀一年期定存利率，之後可改成每日
 
 
 def ingest_all(con, date_str):
-    n = ingest.upsert(con, "warrant_basic", ingest.twse_basic())
-    print("  上市基本資料 %6d 筆" % n)
-    n = ingest.upsert(con, "warrant_basic", ingest.tpex_basic())
-    print("  上櫃基本資料 %6d 筆" % n)
+    # 行情要先入庫：上市基本資料缺標的代號，得靠行情表補，而且必須在寫入
+    # 基本資料「之前」補好，否則去重會因為前後內容不一致而完全失效。
     n = ingest.upsert(con, "warrant_quote", ingest.twse_quotes(date_str))
     print("  上市每日行情 %6d 筆" % n)
     rows = [r for r in ingest.tpex_quotes() if r["trade_date"]]
     n = ingest.upsert(con, "warrant_quote", rows)
     print("  上櫃每日行情 %6d 筆" % n)
-    ingest.backfill_underlying(con)
-    print("  已回填上市標的代號")
+
+    umap = ingest.underlying_map(con)
+    basic = ingest.twse_basic()
+    for r in basic:
+        if not r["underlying"]:
+            r["underlying"] = umap.get(r["code"])
+    n, same = ingest.upsert_basic(con, basic)
+    print("  上市基本資料 %6d 筆異動（%d 筆未變動，略過）" % (n, same))
+    n, same = ingest.upsert_basic(con, ingest.tpex_basic())
+    print("  上櫃基本資料 %6d 筆異動（%d 筆未變動，略過）" % (n, same))
 
 
 def build_metrics(con, trade_date, risk_free=RISK_FREE):
@@ -100,12 +106,18 @@ def build_metrics(con, trade_date, risk_free=RISK_FREE):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--date", default=None, help="交易日 YYYYMMDD，預設為今天")
+    ap.add_argument("--date", default=None,
+                    help="交易日 YYYYMMDD，省略則自動抓最近一個有行情的交易日")
     ap.add_argument("--db", default="warrant.db")
     ap.add_argument("--skip-fetch", action="store_true")
     a = ap.parse_args()
 
-    date_str = a.date or datetime.date.today().strftime("%Y%m%d")
+    date_str = a.date
+    if not date_str:
+        date_str = ingest.latest_trading_date()
+        if not date_str:
+            raise SystemExit("找不到最近的交易日：證交所可能暫時無法連線")
+        print("自動判定最近交易日：%s" % date_str)
     trade_date = "%s-%s-%s" % (date_str[:4], date_str[4:6], date_str[6:8])
 
     con = ingest.connect(a.db)

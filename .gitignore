@@ -8,3 +8,6 @@ warrant.db-shm
 
 # 中繼格式；網頁實際使用的是 docs/data.js
 docs/data.json
+
+# 網頁資料由 GitHub Actions 每日產生後直接部署，不進版控
+docs/data.js
