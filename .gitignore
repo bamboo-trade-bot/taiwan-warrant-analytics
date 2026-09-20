@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+
+# SQLite 資料庫（每日重建，37MB 起跳）
+warrant.db
+warrant.db-wal
+warrant.db-shm
+
+# 網頁用資料，由 export_web.py 產生（單日約 2.9MB，每天重產不該進版控）
+site/data.js
+site/data.json

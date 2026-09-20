@@ -1,0 +1,592 @@
+<title>權證隱波篩選器</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@700&display=swap">
+<style>
+:root{
+  --paper:#EEF1F4;
+  --surface:#FFFFFF;
+  --surface-2:#F5F7F9;
+  --line:#D5DCE3;
+  --line-soft:#E4EAEF;
+  --text:#171B21;
+  --text-2:#4A545F;
+  --muted:#77838F;
+  --gold:#A06A16;
+  --gold-soft:#F0E3CA;
+  --call:#C4343C;
+  --put:#0E7A54;
+  --call-soft:#FAE6E7;
+  --put-soft:#DDF1E9;
+  --shadow:0 1px 2px rgba(20,28,38,.06),0 8px 24px -16px rgba(20,28,38,.28);
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
+  --serif:"Noto Serif TC",Georgia,"Songti TC",serif;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#111418;
+    --surface:#191D23;
+    --surface-2:#1F242B;
+    --line:#2E353E;
+    --line-soft:#252B33;
+    --text:#E6EAEE;
+    --text-2:#AEB8C3;
+    --muted:#828D99;
+    --gold:#D9AB55;
+    --gold-soft:#3A2F17;
+    --call:#E8666C;
+    --put:#3BB98A;
+    --call-soft:#3A2023;
+    --put-soft:#143026;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -16px rgba(0,0,0,.8);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#111418;
+  --surface:#191D23;
+  --surface-2:#1F242B;
+  --line:#2E353E;
+  --line-soft:#252B33;
+  --text:#E6EAEE;
+  --text-2:#AEB8C3;
+  --muted:#828D99;
+  --gold:#D9AB55;
+  --gold-soft:#3A2F17;
+  --call:#E8666C;
+  --put:#3BB98A;
+  --call-soft:#3A2023;
+  --put-soft:#143026;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -16px rgba(0,0,0,.8);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0;background:var(--paper);color:var(--text);
+  font-family:var(--sans);font-size:14px;line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+}
+:focus-visible{outline:2px solid var(--gold);outline-offset:2px;border-radius:3px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* ---------- 頁首 ---------- */
+.topbar{
+  background:var(--surface);border-bottom:1px solid var(--line);
+  padding-block:18px 14px;
+}
+.wrap{max-width:1420px;margin:0 auto;padding-inline:20px}
+.brandrow{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px}
+h1{
+  font-family:var(--serif);font-weight:700;font-size:23px;line-height:1.2;
+  margin:0;letter-spacing:.01em;
+}
+.asof{
+  font-family:var(--mono);font-size:12px;color:var(--muted);
+  border:1px solid var(--line);border-radius:999px;padding:2px 9px;
+}
+.tagline{color:var(--text-2);font-size:13px;margin:6px 0 0;max-width:62ch}
+.stats{display:flex;flex-wrap:wrap;gap:6px 26px;margin-top:14px}
+.stat{display:flex;flex-direction:column;gap:1px}
+.stat b{font-family:var(--mono);font-size:17px;font-weight:600;font-variant-numeric:tabular-nums}
+.stat span{font-size:11px;color:var(--muted);letter-spacing:.07em}
+
+/* ---------- 版面 ---------- */
+main{max-width:1420px;margin:0 auto;padding-inline:20px;padding-block:20px 8px;
+  display:grid;grid-template-columns:266px minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:920px){main{grid-template-columns:1fr}}
+
+/* ---------- 篩選器 ---------- */
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow)}
+.filters{padding:16px 16px 18px;position:sticky;top:calc(env(safe-area-inset-top,0px) + 12px)}
+@media (max-width:920px){.filters{position:static}}
+.filters h2{
+  font-size:11px;letter-spacing:.12em;color:var(--muted);font-weight:500;
+  margin:0 0 14px;text-transform:uppercase;
+}
+.field{margin-bottom:15px}
+.field>label{display:block;font-size:12px;color:var(--text-2);margin-bottom:6px;font-weight:500}
+input[type=text],input[type=number],select{
+  width:100%;font-family:var(--sans);font-size:13px;color:var(--text);
+  background:var(--surface-2);border:1px solid var(--line);border-radius:6px;padding:7px 9px;
+}
+input[type=number]{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.pair{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:7px}
+.pair span{color:var(--muted);font-size:12px}
+.seg{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg button{
+  flex:1;border:0;background:var(--surface-2);color:var(--text-2);
+  font-family:var(--sans);font-size:12.5px;padding:7px 4px;cursor:pointer;
+}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button[aria-pressed=true]{background:var(--gold-soft);color:var(--gold);font-weight:700}
+.chips{display:flex;flex-wrap:wrap;gap:5px}
+.chips button{
+  border:1px solid var(--line);background:var(--surface-2);color:var(--text-2);
+  font-family:var(--sans);font-size:11.5px;padding:3px 8px;border-radius:999px;cursor:pointer;
+}
+.chips button[aria-pressed=true]{background:var(--gold-soft);border-color:var(--gold);color:var(--gold);font-weight:700}
+.rangerow{display:flex;align-items:center;gap:9px}
+input[type=range]{flex:1;accent-color:var(--gold);min-width:0}
+.rangeval{font-family:var(--mono);font-size:12px;color:var(--text);min-width:44px;text-align:right;font-variant-numeric:tabular-nums}
+.reset{
+  width:100%;margin-top:4px;border:1px solid var(--line);background:transparent;
+  color:var(--text-2);font-family:var(--sans);font-size:12.5px;padding:7px;border-radius:6px;cursor:pointer;
+}
+.reset:hover{border-color:var(--gold);color:var(--gold)}
+
+/* ---------- 隱波分佈 ---------- */
+.strip{padding:15px 18px 13px;margin-bottom:16px}
+.strip-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:4px 12px;margin-bottom:12px}
+.strip-head h3{font-family:var(--serif);font-size:15px;font-weight:700;margin:0}
+.strip-head p{margin:0;font-size:12px;color:var(--muted);max-width:58ch}
+.strip-track{
+  position:relative;height:40px;border-radius:5px;
+  background:linear-gradient(90deg,var(--put-soft),var(--surface-2) 45%,var(--call-soft));
+  border:1px solid var(--line-soft);
+}
+.tick{position:absolute;top:6px;bottom:6px;width:2px;margin-left:-1px;background:var(--text-2);opacity:.42;border-radius:1px}
+.tick.med{top:0;bottom:0;width:2px;background:var(--gold);opacity:1}
+.strip-axis{display:flex;justify-content:space-between;margin-top:7px;font-family:var(--mono);font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.strip-axis .mid{color:var(--gold);font-weight:600}
+
+/* ---------- 表格 ---------- */
+.resulthead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:4px 12px;padding:0 2px 10px}
+.resulthead p{margin:0;font-size:12.5px;color:var(--muted)}
+.resulthead b{font-family:var(--mono);color:var(--text);font-variant-numeric:tabular-nums}
+.tablewrap{overflow-x:auto;border-radius:10px}
+table{border-collapse:collapse;width:100%;min-width:860px;background:var(--surface)}
+th,td{padding:8px 10px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--line-soft)}
+th{
+  position:sticky;top:0;z-index:2;background:var(--surface-2);
+  font-size:11px;font-weight:500;color:var(--muted);letter-spacing:.04em;
+  cursor:pointer;user-select:none;border-bottom:1px solid var(--line);
+}
+th:hover{color:var(--gold)}
+th[aria-sort]{color:var(--gold);font-weight:700}
+th .arr{font-family:var(--mono);font-size:9px;margin-left:2px}
+th:first-child,td:first-child{text-align:left;position:sticky;left:0;background:var(--surface);z-index:1}
+th:first-child{background:var(--surface-2);z-index:3}
+tbody tr:hover td{background:var(--surface-2)}
+tbody tr:hover td:first-child{background:var(--surface-2)}
+td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12.5px}
+.wname{display:flex;align-items:center;gap:7px}
+.wname .kd{
+  font-size:10.5px;font-weight:700;border-radius:3px;padding:1px 4px;line-height:1.5;
+  border:1px solid currentColor;
+}
+.kd.c{color:var(--call)}
+.kd.p{color:var(--put)}
+.wname .nm{font-weight:500}
+.wname .cd{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.otc{font-size:10px;color:var(--muted);border:1px solid var(--line);border-radius:3px;padding:0 3px}
+
+.ivcell{display:flex;align-items:center;justify-content:flex-end;gap:8px}
+.ivnum{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12.5px}
+.dev{display:flex;align-items:center;gap:5px;min-width:74px;justify-content:flex-end}
+.devbar{position:relative;width:38px;height:9px;background:var(--surface-2);border-radius:2px;flex:none}
+.devbar::before{content:"";position:absolute;left:50%;top:-1px;bottom:-1px;width:1px;background:var(--line);}
+.devbar i{position:absolute;top:1px;bottom:1px;border-radius:1px}
+.devtxt{font-family:var(--mono);font-size:11px;min-width:34px;text-align:right;font-variant-numeric:tabular-nums}
+.hi{color:var(--call)} .hi i{background:var(--call)}
+.lo{color:var(--put)}  .lo i{background:var(--put)}
+.mid0{color:var(--muted)} .mid0 i{background:var(--muted);opacity:.55}
+
+.empty{padding:44px 20px;text-align:center;color:var(--muted);background:var(--surface);border-radius:10px}
+
+footer{max-width:1420px;margin:0 auto;padding:22px 20px 34px;color:var(--muted);font-size:12px}
+footer p{margin:0 0 6px;max-width:80ch}
+footer a{color:var(--gold)}
+</style>
+
+<header class="topbar">
+  <div class="wrap">
+    <div class="brandrow">
+      <h1>權證隱波篩選器</h1>
+      <span class="asof" id="asof">—</span>
+    </div>
+    <p class="tagline">同一檔標的、同樣天期的權證，隱含波動率可以差上三倍。買到隱波偏高的那一檔，標的漲了你還是會賠。這裡把每一檔的隱波跟同群中位數擺在一起比。</p>
+    <div class="stats">
+      <div class="stat"><b id="s-total">—</b><span>可交易權證</span></div>
+      <div class="stat"><b id="s-und">—</b><span>標的檔數</span></div>
+      <div class="stat"><b id="s-iv">—</b><span>全市場隱波中位數</span></div>
+      <div class="stat"><b id="s-spread">—</b><span>價差比中位數</span></div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <aside class="panel filters">
+    <h2>篩選條件</h2>
+
+    <div class="field">
+      <label for="f-und">標的（代號或名稱）</label>
+      <input type="text" id="f-und" list="undlist" placeholder="留白＝全部標的" autocomplete="off">
+      <datalist id="undlist"></datalist>
+    </div>
+
+    <div class="field">
+      <label>權證類型</label>
+      <div class="seg" id="f-kind" role="group" aria-label="權證類型">
+        <button type="button" data-v="-1">全部</button>
+        <button type="button" data-v="0">認購</button>
+        <button type="button" data-v="1">認售</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="f-money">價內外</label>
+      <select id="f-money">
+        <option value="all">全部</option>
+        <option value="in">價內（價平以上）</option>
+        <option value="atm">價平 ±3%</option>
+        <option value="out">價外</option>
+        <option value="deep">深度價外（&lt;−15%）</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label>剩餘天數</label>
+      <div class="pair">
+        <input type="number" id="f-dmin" min="5" max="900" step="1">
+        <span>至</span>
+        <input type="number" id="f-dmax" min="5" max="900" step="1">
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="f-spread">買賣價差比上限</label>
+      <div class="rangerow">
+        <input type="range" id="f-spread" min="1" max="60" step="1">
+        <span class="rangeval" id="f-spread-v">—</span>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="f-vol">最低成交張數</label>
+      <input type="number" id="f-vol" min="0" step="10">
+    </div>
+
+    <div class="field">
+      <label>發行券商</label>
+      <div class="chips" id="f-iss"></div>
+    </div>
+
+    <button type="button" class="reset" id="f-reset">重設所有條件</button>
+  </aside>
+
+  <section>
+    <div class="panel strip" id="strip" hidden>
+      <div class="strip-head">
+        <h3 id="strip-title">隱波分佈</h3>
+        <p id="strip-note"></p>
+      </div>
+      <div class="strip-track" id="strip-track"></div>
+      <div class="strip-axis">
+        <span id="strip-lo">—</span>
+        <span class="mid" id="strip-med">—</span>
+        <span id="strip-hi">—</span>
+      </div>
+    </div>
+
+    <div class="resulthead">
+      <p id="count">載入中…</p>
+      <p>「相對」＝該檔隱波與<b>同標的、同方向、同天期級距</b>權證中位數的差距</p>
+    </div>
+
+    <div class="tablewrap panel" id="tablewrap">
+      <table>
+        <thead>
+          <tr id="hrow">
+            <th data-k="name">權證</th>
+            <th data-k="iss">券商</th>
+            <th data-k="days">剩餘天</th>
+            <th data-k="strike">履約價</th>
+            <th data-k="money">價內外</th>
+            <th data-k="mid">中價</th>
+            <th data-k="iv">隱含波動率 ／ 相對</th>
+            <th data-k="delta">Delta</th>
+            <th data-k="lev">實質槓桿</th>
+            <th data-k="prem">溢價比</th>
+            <th data-k="spread">價差比</th>
+            <th data-k="vol">成交張</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="empty" hidden>沒有符合條件的權證，放寬條件再試一次。</div>
+  </section>
+</main>
+
+<footer>
+  <p><b>資料來源</b>：臺灣證券交易所「上市權證基本資料彙總表」與每日收盤行情、證券櫃檯買賣中心權證 OpenAPI。隱含波動率與 Greeks 非交易所提供，為以買賣中價（造市商真實報價）反解 Black-Scholes 計算，無風險利率取 1.6%、股利率取 0。</p>
+  <p>已排除牛證、熊證與上下限型權證——那是障礙式選擇權，用 Black-Scholes 計價會系統性高估。當天沒有造市報價、價差比超過 100% 或隱波超過 300% 的權證亦不列入。</p>
+  <p>本頁為資料分析工具，不構成投資建議。權證為高槓桿商品，時間價值每日遞減，到期可能全額損失。</p>
+</footer>
+
+<script src="data.js"></script>
+<script>
+(function(){
+  "use strict";
+  var D = window.WARRANT_DATA;
+  var ROWS = D.rows, UNDS = D.unds, ISSUERS = D.issuers;
+  // row: 0和 1券商 2方向 3代號 4簡稱 5天數 6履約價 7行使比例 8中價
+  //      9隱波 10Delta 11槓桿 12溢價比 13價差比 14成交張 15流通在外 16市場 17到期日
+  var U_CODE=0,U_NAME=1,U_CLOSE=2,U_N=3;
+  var MAX_SHOW = 200;
+
+  var DEFAULTS = {und:"2330", kind:0, money:"all", dmin:20, dmax:120,
+                  spread:10, vol:0, iss:[], sort:"iv", dir:1};
+  var st = Object.assign({}, DEFAULTS);
+  st.iss = [];
+
+  var undByKey = {};
+  UNDS.forEach(function(u,i){
+    undByKey[u[U_CODE]] = i;
+    undByKey[u[U_NAME]] = i;
+  });
+
+  function fmtPct(x,dp){ return x==null ? "—" : (x*100).toFixed(dp==null?1:dp)+"%"; }
+  function fmtNum(x,dp){ return x==null ? "—" : x.toFixed(dp); }
+  function median(a){
+    if(!a.length) return null;
+    var s = a.slice().sort(function(p,q){return p-q;});
+    var m = s.length>>1;
+    return s.length%2 ? s[m] : (s[m-1]+s[m])/2;
+  }
+  function moneyness(r){
+    var S = UNDS[r[0]][U_CLOSE], K = r[6];
+    if(!S || !K) return null;
+    return r[2]===0 ? S/K : K/S;
+  }
+  function bucket(d){ return d<30?0 : d<60?1 : d<120?2 : 3; }
+  var BUCKET_NM = ["30 天內","30–60 天","60–120 天","120 天以上"];
+
+  /* ---------------- 建立選單 ---------------- */
+  (function build(){
+    document.getElementById("asof").textContent = "收盤資料 " + D.date;
+    var dl = document.getElementById("undlist");
+    dl.innerHTML = UNDS.map(function(u){
+      return '<option value="'+u[U_CODE]+'">'+u[U_NAME]+'（'+u[U_N]+' 檔）</option>';
+    }).join("");
+    document.getElementById("f-iss").innerHTML = ISSUERS.map(function(n,i){
+      return '<button type="button" data-i="'+i+'" aria-pressed="false">'+n+'</button>';
+    }).join("");
+    document.getElementById("s-total").textContent = ROWS.length.toLocaleString();
+    document.getElementById("s-und").textContent = UNDS.length.toLocaleString();
+    document.getElementById("s-iv").textContent = fmtPct(median(ROWS.map(function(r){return r[9];})));
+    document.getElementById("s-spread").textContent = fmtPct(median(ROWS.map(function(r){return r[13];})));
+  })();
+
+  /* ---------------- 篩選 ---------------- */
+  function filtered(){
+    var undIdx = -1;
+    if(st.und){
+      var key = st.und.trim();
+      undIdx = undByKey[key] != null ? undByKey[key] : -2;   // -2 = 查無此標的
+    }
+    var issSet = st.iss.length ? st.iss : null;
+    var out = [];
+    for(var i=0;i<ROWS.length;i++){
+      var r = ROWS[i];
+      if(undIdx === -2) break;
+      if(undIdx >= 0 && r[0] !== undIdx) continue;
+      if(st.kind >= 0 && r[2] !== st.kind) continue;
+      if(r[5] < st.dmin || r[5] > st.dmax) continue;
+      if(r[13] > st.spread/100) continue;
+      if(r[14] < st.vol) continue;
+      if(issSet && issSet.indexOf(r[1]) < 0) continue;
+      if(st.money !== "all"){
+        var m = moneyness(r);
+        if(m == null) continue;
+        if(st.money === "in"   && m < 1.03) continue;
+        if(st.money === "atm"  && (m < 0.97 || m > 1.03)) continue;
+        if(st.money === "out"  && m >= 0.97) continue;
+        if(st.money === "deep" && m >= 0.85) continue;
+      }
+      out.push(r);
+    }
+    return out;
+  }
+
+  /* 同標的 + 同方向 + 同天期級距 的隱波中位數 */
+  function peerMedians(list){
+    var g = {};
+    list.forEach(function(r){
+      var k = r[0]+"|"+r[2]+"|"+bucket(r[5]);
+      (g[k] || (g[k]=[])).push(r[9]);
+    });
+    var med = {};
+    for(var k in g) if(g[k].length >= 3) med[k] = median(g[k]);
+    return med;
+  }
+
+  var SORTERS = {
+    name:  function(r){ return r[4]; },
+    iss:   function(r){ return ISSUERS[r[1]]; },
+    days:  function(r){ return r[5]; },
+    strike:function(r){ return r[6]; },
+    money: function(r){ return moneyness(r) || 0; },
+    mid:   function(r){ return r[8]; },
+    iv:    function(r){ return r[9]; },
+    delta: function(r){ return Math.abs(r[10]); },
+    lev:   function(r){ return Math.abs(r[11]); },
+    prem:  function(r){ return r[12]; },
+    spread:function(r){ return r[13]; },
+    vol:   function(r){ return r[14]; }
+  };
+
+  function devClass(d){ return d > 0.08 ? "hi" : d < -0.08 ? "lo" : "mid0"; }
+
+  function rowHTML(r, med){
+    var u = UNDS[r[0]];
+    var m = moneyness(r);
+    var key = r[0]+"|"+r[2]+"|"+bucket(r[5]);
+    var mv = med[key], dev = mv ? r[9]/mv - 1 : null;
+    var devHTML;
+    if(dev == null){
+      devHTML = '<span class="dev mid0"><span class="devbar"></span><span class="devtxt">—</span></span>';
+    }else{
+      var c = devClass(dev);
+      var w = Math.min(Math.abs(dev), 0.5) / 0.5 * 19;       // 半寬 19px
+      var style = dev >= 0 ? 'left:50%;width:'+w.toFixed(1)+'px'
+                           : 'right:50%;width:'+w.toFixed(1)+'px';
+      devHTML = '<span class="dev '+c+'"><span class="devbar"><i style="'+style+'"></i></span>'+
+                '<span class="devtxt">'+(dev>=0?"+":"")+(dev*100).toFixed(0)+'%</span></span>';
+    }
+    return '<tr>'+
+      '<td><span class="wname">'+
+        '<span class="kd '+(r[2]===0?"c":"p")+'">'+(r[2]===0?"購":"售")+'</span>'+
+        '<span class="nm">'+r[4]+'</span>'+
+        '<span class="cd">'+r[3]+'</span>'+
+        (r[16]===1?'<span class="otc">櫃</span>':'')+
+      '</span></td>'+
+      '<td>'+ISSUERS[r[1]]+'</td>'+
+      '<td class="num">'+r[5]+'</td>'+
+      '<td class="num">'+fmtNum(r[6],2)+'</td>'+
+      '<td class="num">'+(m==null?"—":((m-1>=0?"+":"")+((m-1)*100).toFixed(1)+"%"))+'</td>'+
+      '<td class="num">'+fmtNum(r[8],2)+'</td>'+
+      '<td><span class="ivcell"><span class="ivnum">'+fmtPct(r[9])+'</span>'+devHTML+'</span></td>'+
+      '<td class="num">'+fmtNum(r[10],4)+'</td>'+
+      '<td class="num">'+fmtNum(r[11],2)+'</td>'+
+      '<td class="num">'+fmtPct(r[12])+'</td>'+
+      '<td class="num">'+fmtPct(r[13],2)+'</td>'+
+      '<td class="num">'+(r[14]?r[14].toLocaleString():"0")+'</td>'+
+    '</tr>';
+  }
+
+  function drawStrip(list){
+    var el = document.getElementById("strip");
+    var single = st.und && undByKey[st.und.trim()] != null;
+    if(!single || list.length < 5){ el.hidden = true; return; }
+    el.hidden = false;
+    var u = UNDS[undByKey[st.und.trim()]];
+    var ivs = list.map(function(r){ return r[9]; });
+    var lo = Math.min.apply(null, ivs), hi = Math.max.apply(null, ivs), md = median(ivs);
+    var span = (hi - lo) || 1;
+    document.getElementById("strip-title").textContent =
+      u[U_NAME] + "（" + u[U_CODE] + "） 收盤 " + u[U_CLOSE] + " ・ 符合條件 " + list.length + " 檔的隱波分佈";
+    document.getElementById("strip-note").textContent =
+      "最貴的一檔隱波是最便宜那檔的 " + (hi/lo).toFixed(1) + " 倍。每一道刻線是一檔權證，金色線為中位數。";
+    document.getElementById("strip-track").innerHTML = list.map(function(r){
+      var p = (r[9]-lo)/span*100;
+      return '<span class="tick" style="left:'+p.toFixed(2)+'%"></span>';
+    }).join("") + '<span class="tick med" style="left:'+((md-lo)/span*100).toFixed(2)+'%"></span>';
+    document.getElementById("strip-lo").textContent  = "最低 " + fmtPct(lo);
+    document.getElementById("strip-med").textContent = "中位 " + fmtPct(md);
+    document.getElementById("strip-hi").textContent  = "最高 " + fmtPct(hi);
+  }
+
+  function render(){
+    var list = filtered();
+    var med = peerMedians(list);
+    var get = SORTERS[st.sort];
+    list.sort(function(a,b){
+      var x = get(a), y = get(b);
+      if(x === y) return 0;
+      return (x > y ? 1 : -1) * st.dir;
+    });
+
+    drawStrip(list);
+
+    var shown = list.slice(0, MAX_SHOW);
+    document.getElementById("tbody").innerHTML = shown.map(function(r){ return rowHTML(r, med); }).join("");
+    document.getElementById("tablewrap").hidden = list.length === 0;
+    document.getElementById("empty").hidden = list.length !== 0;
+    document.getElementById("count").innerHTML = list.length
+      ? "符合條件 <b>" + list.length.toLocaleString() + "</b> 檔" +
+        (list.length > MAX_SHOW ? "，依目前排序顯示前 " + MAX_SHOW + " 檔" : "")
+      : "沒有符合條件的權證";
+
+    var ths = document.querySelectorAll("#hrow th");
+    for(var i=0;i<ths.length;i++){
+      var th = ths[i], base = th.textContent.replace(/[▲▼]\s*$/,"").trim();
+      if(th.dataset.k === st.sort){
+        th.setAttribute("aria-sort", st.dir === 1 ? "ascending" : "descending");
+        th.innerHTML = base + '<span class="arr">' + (st.dir === 1 ? "▲" : "▼") + '</span>';
+      }else{
+        th.removeAttribute("aria-sort");
+        th.textContent = base;
+      }
+    }
+  }
+
+  /* ---------------- 事件 ---------------- */
+  function syncControls(){
+    document.getElementById("f-und").value = st.und;
+    document.getElementById("f-money").value = st.money;
+    document.getElementById("f-dmin").value = st.dmin;
+    document.getElementById("f-dmax").value = st.dmax;
+    document.getElementById("f-spread").value = st.spread;
+    document.getElementById("f-spread-v").textContent = st.spread + "%";
+    document.getElementById("f-vol").value = st.vol;
+    var kb = document.querySelectorAll("#f-kind button");
+    for(var i=0;i<kb.length;i++) kb[i].setAttribute("aria-pressed", String(+kb[i].dataset.v === st.kind));
+    var ib = document.querySelectorAll("#f-iss button");
+    for(var j=0;j<ib.length;j++) ib[j].setAttribute("aria-pressed", String(st.iss.indexOf(+ib[j].dataset.i) >= 0));
+  }
+
+  document.getElementById("f-und").addEventListener("input", function(e){
+    st.und = e.target.value; render();
+  });
+  document.getElementById("f-money").addEventListener("change", function(e){
+    st.money = e.target.value; render();
+  });
+  ["f-dmin","f-dmax","f-vol"].forEach(function(id){
+    document.getElementById(id).addEventListener("input", function(e){
+      var v = parseFloat(e.target.value);
+      if(isNaN(v)) return;
+      st[id === "f-dmin" ? "dmin" : id === "f-dmax" ? "dmax" : "vol"] = v;
+      render();
+    });
+  });
+  document.getElementById("f-spread").addEventListener("input", function(e){
+    st.spread = +e.target.value;
+    document.getElementById("f-spread-v").textContent = st.spread + "%";
+    render();
+  });
+  document.getElementById("f-kind").addEventListener("click", function(e){
+    var b = e.target.closest("button"); if(!b) return;
+    st.kind = +b.dataset.v; syncControls(); render();
+  });
+  document.getElementById("f-iss").addEventListener("click", function(e){
+    var b = e.target.closest("button"); if(!b) return;
+    var i = +b.dataset.i, at = st.iss.indexOf(i);
+    if(at >= 0) st.iss.splice(at,1); else st.iss.push(i);
+    syncControls(); render();
+  });
+  document.getElementById("hrow").addEventListener("click", function(e){
+    var th = e.target.closest("th"); if(!th) return;
+    var k = th.dataset.k;
+    if(st.sort === k){ st.dir = -st.dir; }
+    else { st.sort = k; st.dir = (k === "iv" || k === "spread" || k === "prem") ? 1 : -1; }
+    render();
+  });
+  document.getElementById("f-reset").addEventListener("click", function(){
+    st = Object.assign({}, DEFAULTS); st.iss = [];
+    syncControls(); render();
+  });
+
+  syncControls();
+  render();
+})();
+</script>
