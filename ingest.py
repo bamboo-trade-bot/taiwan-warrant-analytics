@@ -249,7 +249,25 @@ def connect(path="warrant.db"):
     here = os.path.dirname(os.path.abspath(__file__))
     with open(os.path.join(here, "schema.sql"), encoding="utf-8") as fh:
         con.executescript(fh.read())
+    migrate(con)
     return con
+
+
+def migrate(con):
+    """補上新加的欄位。
+
+    schema.sql 用的是 CREATE TABLE IF NOT EXISTS，對已存在的資料庫不會生效，
+    而正式環境的資料庫是從 release 取回來的舊檔，只能靠 ALTER 補。
+    """
+    wanted = {
+        "warrant_quote": [("quote_src", "TEXT")],
+    }
+    for table, cols in wanted.items():
+        have = set(r[1] for r in con.execute("PRAGMA table_info(%s)" % table))
+        for name, typ in cols:
+            if name not in have:
+                con.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, name, typ))
+    con.commit()
 
 
 def upsert(con, table, rows):

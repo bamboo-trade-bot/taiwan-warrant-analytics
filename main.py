@@ -9,6 +9,7 @@ import argparse, datetime, statistics, sys, os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ingest
+import mis
 import greeks as gk
 
 RISK_FREE = 0.016          # 台銀一年期定存利率，之後可改成每日抓取
@@ -32,6 +33,25 @@ def ingest_all(con, date_str):
     print("  上市基本資料 %6d 筆異動（%d 筆未變動，略過）" % (n, same))
     n, same = ingest.upsert_basic(con, ingest.tpex_basic())
     print("  上櫃基本資料 %6d 筆異動（%d 筆未變動，略過）" % (n, same))
+
+
+def fill_otc_quotes(con, trade_date):
+    """用 MIS 盤後快照補上櫃權證的買賣報價。
+
+    失敗不該讓整條流程掛掉：MIS 不是正式 API，沒有 SLA。補不到就退回原本
+    用收盤價的行為，只是資料品質差一點，而不是當天完全沒有資料。
+    """
+    state = {"next": 2500}          # CI 的 log 不會處理 \r，改成每隔一段印一行
+
+    def show(done, total, got):
+        if done >= state["next"] or done >= total:
+            print("    掃描中 %5d/%d，已取得 %5d 筆報價" % (done, total, got))
+            state["next"] = done + 2500
+    try:
+        n, stale = mis.fill_missing_quotes(con, trade_date, "OTC", progress=show)
+        print("  MIS 補上櫃買賣報價 %5d 筆（日期不符略過 %d）" % (n, stale))
+    except Exception as e:
+        print("  MIS 掃描失敗，上櫃將沿用收盤價：%s" % e)
 
 
 def build_metrics(con, trade_date, risk_free=RISK_FREE):
@@ -110,6 +130,8 @@ def main():
                     help="交易日 YYYYMMDD，省略則自動抓最近一個有行情的交易日")
     ap.add_argument("--db", default="warrant.db")
     ap.add_argument("--skip-fetch", action="store_true")
+    ap.add_argument("--no-mis", action="store_true",
+                    help="跳過 MIS 掃描，上櫃權證將沿用收盤價")
     a = ap.parse_args()
 
     date_str = a.date
@@ -124,6 +146,8 @@ def main():
     if not a.skip_fetch:
         print("擷取 %s ..." % trade_date)
         ingest_all(con, date_str)
+        if not a.no_mis:
+            fill_otc_quotes(con, trade_date)
     print("計算指標 ...")
     build_metrics(con, trade_date)
     con.close()

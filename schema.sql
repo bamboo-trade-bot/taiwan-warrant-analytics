@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS warrant_quote (
     ask          REAL, ask_size REAL,
     underlying   TEXT,
     und_close    REAL,              -- 標的收盤價
+    quote_src    TEXT,              -- 買賣報價來源：NULL=交易所每日行情、MIS=盤後即時報價快照
     PRIMARY KEY (trade_date, code)
 );
 
