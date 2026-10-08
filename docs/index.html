@@ -711,11 +711,11 @@ footer a{color:var(--gold)}
 
   /* 用即時報價重算一列。拿不到買賣報價就回 null，沿用收盤資料。 */
   function liveView(r){
-    var q = LIVE.quotes[r[3]];
+    var q = LIVE.quotes[chan(r[3], r[16])];
     if(!q || !(q.bid > 0) || !(q.ask > 0)) return null;
     var mid = (q.bid + q.ask) / 2;
     var und = UNDS[r[0]];
-    var uq = LIVE.quotes[und[U_CODE]];
+    var uq = LIVE.quotes[chan(und[U_CODE], r[16])];
     var S = (uq && (uq.price > 0 ? uq.price
                    : (uq.bid > 0 && uq.ask > 0) ? (uq.bid + uq.ask) / 2 : null)) || und[U_CLOSE];
     var K = r[6], ratio = r[7], days = daysLeft(r);
@@ -801,7 +801,10 @@ footer a{color:var(--gold)}
     })).then(function(parts){
       var q = {};
       parts.forEach(function(p){
-        (p.quotes || []).forEach(function(x){ q[x.code] = x; });
+        // Worker 回傳的 quotes 是物件（鍵為 "tse_2330" 這種完整管道名），
+        // 不是陣列也不是純代號。沿用它的鍵，順便避免上市上櫃代號相撞。
+        var m = p.quotes || {};
+        for(var k in m) if(Object.prototype.hasOwnProperty.call(m, k)) q[k] = m[k];
       });
       LIVE.quotes = q; LIVE.at = new Date(); LIVE.err = null;
       var n = applyLive();
