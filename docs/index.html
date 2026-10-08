@@ -89,6 +89,23 @@ h1{
 .stat b{font-family:var(--mono);font-size:17px;font-weight:600;font-variant-numeric:tabular-nums}
 .stat span{font-size:11px;color:var(--muted);letter-spacing:.07em}
 
+/* ---------- 盤中即時 ---------- */
+.liverow{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-top:14px}
+#livetoggle{
+  display:inline-flex;align-items:center;gap:6px;
+  border:1px solid var(--line);background:var(--surface-2);color:var(--text-2);
+  font-family:var(--sans);font-size:12.5px;padding:5px 11px;border-radius:999px;cursor:pointer;
+}
+#livetoggle[aria-pressed=true]{background:var(--gold-soft);border-color:var(--gold);color:var(--gold);font-weight:700}
+#livetoggle .dot{width:7px;height:7px;border-radius:50%;background:var(--muted);flex:none}
+#livetoggle[aria-pressed=true] .dot{background:var(--gold);animation:pulse 2s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){#livetoggle[aria-pressed=true] .dot{animation:none}}
+.livestat{font-family:var(--mono);font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.livestat.ok{color:var(--text-2)}
+.livestat.err{color:var(--call)}
+tbody tr.islive td.c-iv .ivnum{color:var(--gold);font-weight:600}
+
 /* ---------- 版面 ---------- */
 main{max-width:1420px;margin:0 auto;padding-inline:20px;padding-block:20px 8px;
   display:grid;grid-template-columns:266px minmax(0,1fr);gap:20px;align-items:start}
@@ -218,6 +235,12 @@ footer a{color:var(--gold)}
       <div class="stat"><b id="s-und">—</b><span>標的檔數</span></div>
       <div class="stat"><b id="s-iv">—</b><span>全市場隱波中位數</span></div>
       <div class="stat"><b id="s-spread">—</b><span>價差比中位數（限上市）</span></div>
+    </div>
+    <div class="liverow">
+      <button type="button" id="livetoggle" aria-pressed="false">
+        <span class="dot"></span>盤中即時
+      </button>
+      <span class="livestat" id="livestat">—</span>
     </div>
   </div>
 </header>
@@ -368,6 +391,56 @@ footer a{color:var(--gold)}
     undByKey[u[U_NAME]] = i;
   });
 
+  /* ------------------------------------------------------------------
+     盤中即時：Black-Scholes 的 JavaScript 版
+
+     收盤資料由 Python 端算好寫進 data.js，但盤中報價是瀏覽器直接向
+     Cloudflare Worker 取得的（證交所 MIS 不送 CORS 標頭，必須有這層代理），
+     所以隱波要在這裡重算一次。公式與 greeks.py 一致——最關鍵的是權證價
+     必須先除以行使比例，少了這一步算出來的隱波會完全錯誤。
+  ------------------------------------------------------------------ */
+  var RISK_FREE = 0.016;
+
+  function normCdf(x){
+    // Abramowitz & Stegun 26.2.17，絕對誤差 < 7.5e-8，對反解隱波足夠
+    var s = x < 0 ? -1 : 1, z = Math.abs(x) / Math.SQRT2;
+    var t = 1 / (1 + 0.3275911 * z);
+    var y = 1 - ((((1.061405429*t - 1.453152027)*t + 1.421413741)*t
+                 - 0.284496736)*t + 0.254829592) * t * Math.exp(-z*z);
+    return 0.5 * (1 + s * y);
+  }
+
+  function bsPrice(S, K, T, sig, isCall){
+    if(!(S > 0 && K > 0 && T > 0 && sig > 0)){
+      return Math.max(isCall ? S - K : K - S, 0);
+    }
+    var st = sig * Math.sqrt(T);
+    var d1 = (Math.log(S/K) + (RISK_FREE + 0.5*sig*sig) * T) / st;
+    var d2 = d1 - st;
+    var df = Math.exp(-RISK_FREE * T);
+    return isCall ? S*normCdf(d1) - K*df*normCdf(d2)
+                  : K*df*normCdf(-d2) - S*normCdf(-d1);
+  }
+
+  function impliedVol(price, S, K, T, isCall){
+    if(!(price > 0 && S > 0 && K > 0 && T > 0)) return null;
+    var lo = 1e-4, hi = 5.0;
+    if(bsPrice(S,K,T,lo,isCall) - price > 0) return null;   // 低於理論下界
+    if(bsPrice(S,K,T,hi,isCall) - price < 0) return null;   // 隱波超過 500%，視為異常
+    for(var i = 0; i < 80; i++){
+      var m = 0.5*(lo+hi);
+      if(bsPrice(S,K,T,m,isCall) - price > 0) hi = m; else lo = m;
+      if(hi - lo < 1e-6) break;
+    }
+    return 0.5*(lo+hi);
+  }
+
+  function bsDelta(S, K, T, sig, isCall){
+    if(!(S > 0 && K > 0 && T > 0 && sig > 0)) return 0;
+    var d1 = (Math.log(S/K) + (RISK_FREE + 0.5*sig*sig)*T) / (sig*Math.sqrt(T));
+    return isCall ? normCdf(d1) : normCdf(d1) - 1;
+  }
+
   function fmtPct(x,dp){ return x==null ? "—" : (x*100).toFixed(dp==null?1:dp)+"%"; }
   function fmtNum(x,dp){ return x==null ? "—" : x.toFixed(dp); }
   function median(a){
@@ -476,23 +549,43 @@ footer a{color:var(--gold)}
     return txt + ' <span class="leftpct ' + cls + '">' + Math.round(pct*100) + '%</span>';
   }
 
-  function rowHTML(r, med){
-    var u = UNDS[r[0]];
-    var m = moneyness(r);
-    var key = r[0]+"|"+r[2]+"|"+bucket(r[5]);
-    var mv = med[key], dev = mv ? r[9]/mv - 1 : null;
-    var devHTML;
+  function devHTML(dev){
     if(dev == null){
-      devHTML = '<span class="dev mid0"><span class="devbar"></span><span class="devtxt">—</span></span>';
-    }else{
-      var c = devClass(dev);
-      var w = Math.min(Math.abs(dev), 0.5) / 0.5 * 19;       // 半寬 19px
-      var style = dev >= 0 ? 'left:50%;width:'+w.toFixed(1)+'px'
-                           : 'right:50%;width:'+w.toFixed(1)+'px';
-      devHTML = '<span class="dev '+c+'"><span class="devbar"><i style="'+style+'"></i></span>'+
-                '<span class="devtxt">'+(dev>=0?"+":"")+(dev*100).toFixed(0)+'%</span></span>';
+      return '<span class="dev mid0"><span class="devbar"></span><span class="devtxt">—</span></span>';
     }
-    return '<tr>'+
+    var c = devClass(dev);
+    var w = Math.min(Math.abs(dev), 0.5) / 0.5 * 19;         // 半寬 19px
+    var style = dev >= 0 ? 'left:50%;width:'+w.toFixed(1)+'px'
+                         : 'right:50%;width:'+w.toFixed(1)+'px';
+    return '<span class="dev '+c+'"><span class="devbar"><i style="'+style+'"></i></span>'+
+           '<span class="devtxt">'+(dev>=0?"+":"")+(dev*100).toFixed(0)+'%</span></span>';
+  }
+
+  /* 一列的動態欄位。收盤與盤中共用同一組格式化，差別只在 v 是哪裡來的。 */
+  function cellHTML(r, v, dev){
+    return {
+      money: v.money == null ? "—"
+             : (v.money - 1 >= 0 ? "+" : "") + ((v.money - 1) * 100).toFixed(1) + "%",
+      price: fmtNum(v.price, 2) + (v.fromClose
+             ? '<span class="src" title="無造市商買賣報價，改用收盤價推算">收</span>' : ''),
+      iv:    '<span class="ivcell"><span class="ivnum">'+fmtPct(v.iv)+'</span>'+devHTML(dev)+'</span>',
+      delta: fmtNum(v.delta, 4),
+      lev:   fmtNum(v.lev, 2),
+      prem:  fmtPct(v.prem),
+      spread: fmtPct(v.spread, 2),
+      vol:   v.vol ? v.vol.toLocaleString() : "0"
+    };
+  }
+
+  /* 收盤資料直接取自 data.js 既有欄位 */
+  function closeView(r){
+    return { money: moneyness(r), price: r[8], fromClose: r[18] === 1, iv: r[9],
+             delta: r[10], lev: r[11], prem: r[12], spread: r[13], vol: r[14] };
+  }
+
+  function rowHTML(r, med){
+    var c = cellHTML(r, closeView(r), devOf(r, r[9], med));
+    return '<tr data-code="'+r[3]+'">'+
       '<td><span class="wname">'+
         '<span class="kd '+(r[2]===0?"c":"p")+'">'+(r[2]===0?"購":"售")+'</span>'+
         '<span class="nm">'+r[4]+'</span>'+
@@ -500,20 +593,23 @@ footer a{color:var(--gold)}
         (r[16]===1?'<span class="otc">櫃</span>':'')+
       '</span></td>'+
       '<td>'+ISSUERS[r[1]]+'</td>'+
-      '<td class="num">'+r[5]+'</td>'+
+      '<td class="num c-days">'+r[5]+'</td>'+
       '<td class="num">'+fmtNum(r[6],2)+'</td>'+
-      '<td class="num">'+(m==null?"—":((m-1>=0?"+":"")+((m-1)*100).toFixed(1)+"%"))+'</td>'+
-      '<td class="num">'+fmtNum(r[8],2)+
-        (r[18]===1 ? '<span class="src" title="當日無造市商買賣報價，改用收盤價推算">收</span>' : '')+
-      '</td>'+
-      '<td><span class="ivcell"><span class="ivnum">'+fmtPct(r[9])+'</span>'+devHTML+'</span></td>'+
-      '<td class="num">'+fmtNum(r[10],4)+'</td>'+
-      '<td class="num">'+fmtNum(r[11],2)+'</td>'+
-      '<td class="num">'+fmtPct(r[12])+'</td>'+
-      '<td class="num">'+fmtPct(r[13],2)+'</td>'+
-      '<td class="num">'+(r[14]?r[14].toLocaleString():"0")+'</td>'+
+      '<td class="num c-money">'+c.money+'</td>'+
+      '<td class="num c-price">'+c.price+'</td>'+
+      '<td class="c-iv">'+c.iv+'</td>'+
+      '<td class="num c-delta">'+c.delta+'</td>'+
+      '<td class="num c-lev">'+c.lev+'</td>'+
+      '<td class="num c-prem">'+c.prem+'</td>'+
+      '<td class="num c-spread">'+c.spread+'</td>'+
+      '<td class="num c-vol">'+c.vol+'</td>'+
       '<td class="num">'+leftHTML(r)+'</td>'+
     '</tr>';
+  }
+
+  function devOf(r, iv, med){
+    var mv = med[r[0]+"|"+r[2]+"|"+bucket(r[5])];
+    return (mv && iv) ? iv/mv - 1 : null;
   }
 
   function drawStrip(list){
@@ -555,7 +651,9 @@ footer a{color:var(--gold)}
     drawStrip(list);
 
     var shown = list.slice(0, MAX_SHOW);
+    SHOWN = shown; MED = med;          // 盤中輪詢只更新畫面上這幾列
     document.getElementById("tbody").innerHTML = shown.map(function(r){ return rowHTML(r, med); }).join("");
+    if(LIVE.on) applyLive();           // 重繪後把已取得的即時報價重新套上
     document.getElementById("tablewrap").hidden = list.length === 0;
     document.getElementById("empty").hidden = list.length !== 0;
     document.getElementById("count").innerHTML = list.length
@@ -573,6 +671,160 @@ footer a{color:var(--gold)}
         th.removeAttribute("aria-sort");
         th.textContent = base;
       }
+    }
+  }
+
+  /* ------------------------------------------------------------------
+     盤中即時報價
+
+     證交所 MIS 不送 Access-Control-Allow-Origin，瀏覽器不能直連，所以透過
+     一個 Cloudflare Worker 代理。只查畫面上顯示的那幾十列加上它們的標的，
+     不是整個市場——沒人會同時盯三萬檔，而且那樣會打爆上游。
+
+     指數型標的（代號 IX 開頭）沒有個股報價管道，這些列維持收盤資料。
+  ------------------------------------------------------------------ */
+  var QUOTE_API = "https://taiwan-disposal-quotes.bamboo-trade-bot.workers.dev";
+  var POLL_MS = 15000;
+  var MAX_CODES = 90;                  // Worker 單次上限 100，留點餘裕
+
+  var SHOWN = [], MED = {};
+  var LIVE = { on: false, quotes: {}, timer: null, at: null, err: null };
+
+  function taipeiNow(){ return new Date(Date.now() + 8*3600*1000); }
+
+  function inSession(){
+    var d = taipeiNow(), wd = d.getUTCDay();
+    if(wd === 0 || wd === 6) return false;        // 週末；國定假日靠報價回傳的日期判斷
+    var mins = d.getUTCHours()*60 + d.getUTCMinutes();
+    return mins >= 9*60 && mins <= 13*60 + 35;
+  }
+
+  function chan(code, market){ return (market === 1 ? "otc_" : "tse_") + code; }
+
+  function daysLeft(r){
+    if(!r[17]) return r[5];
+    var t = taipeiNow();
+    var today = Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate());
+    var p = r[17].split("-");
+    return Math.round((Date.UTC(+p[0], +p[1]-1, +p[2]) - today) / 86400000);
+  }
+
+  /* 用即時報價重算一列。拿不到買賣報價就回 null，沿用收盤資料。 */
+  function liveView(r){
+    var q = LIVE.quotes[r[3]];
+    if(!q || !(q.bid > 0) || !(q.ask > 0)) return null;
+    var mid = (q.bid + q.ask) / 2;
+    var und = UNDS[r[0]];
+    var uq = LIVE.quotes[und[U_CODE]];
+    var S = (uq && (uq.price > 0 ? uq.price
+                   : (uq.bid > 0 && uq.ask > 0) ? (uq.bid + uq.ask) / 2 : null)) || und[U_CLOSE];
+    var K = r[6], ratio = r[7], days = daysLeft(r);
+    if(!(S > 0 && K > 0 && ratio > 0 && days > 0)) return null;
+
+    var isCall = r[2] === 0, T = days / 365;
+    var iv = impliedVol(mid / ratio, S, K, T, isCall);
+    var v = {
+      money: isCall ? S/K : K/S,
+      price: mid, fromClose: false,
+      spread: (q.ask - q.bid) / mid,
+      vol: q.volume == null ? r[14] : q.volume,
+      iv: iv, delta: null, lev: null,
+      prem: isCall ? (K + mid/ratio - S)/S : (S + mid/ratio - K)/S,
+      days: days
+    };
+    if(iv != null){
+      v.delta = bsDelta(S, K, T, iv, isCall) * ratio;
+      v.lev = v.delta * S / mid;
+    }
+    return v;
+  }
+
+  function applyLive(){
+    // 同群（同標的、同方向、同天期級距）的即時隱波中位數，用來重算「相對」。
+    // 樣本不足時沿用收盤資料算出的中位數，免得拿兩三檔就下結論。
+    var g = {};
+    SHOWN.forEach(function(r){
+      var v = liveView(r);
+      if(v && v.iv) (g[r[0]+"|"+r[2]+"|"+bucket(r[5])] || (g[r[0]+"|"+r[2]+"|"+bucket(r[5])] = [])).push(v.iv);
+    });
+    var liveMed = {};
+    for(var k in g) if(g[k].length >= 3) liveMed[k] = median(g[k]);
+
+    var tb = document.getElementById("tbody"), n = 0;
+    SHOWN.forEach(function(r){
+      var tr = tb.querySelector('tr[data-code="'+r[3]+'"]');
+      if(!tr) return;
+      var v = liveView(r);
+      if(!v){ tr.classList.remove("islive"); return; }
+      n++;
+      var key = r[0]+"|"+r[2]+"|"+bucket(r[5]);
+      var mv = liveMed[key] != null ? liveMed[key] : MED[key];
+      var c = cellHTML(r, v, (mv && v.iv) ? v.iv/mv - 1 : null);
+      ["days","money","price","iv","delta","lev","prem","spread","vol"].forEach(function(f){
+        var td = tr.querySelector(".c-" + f);
+        if(!td) return;
+        var html = f === "days" ? String(v.days) : c[f];
+        if(td.innerHTML !== html) td.innerHTML = html;
+      });
+      tr.classList.add("islive");
+    });
+    return n;
+  }
+
+  function setLiveStatus(text, cls){
+    var el = document.getElementById("livestat");
+    el.className = "livestat" + (cls ? " " + cls : "");
+    el.textContent = text;
+  }
+
+  function pollQuotes(){
+    if(!SHOWN.length){ setLiveStatus("沒有要更新的列"); return; }
+    var keys = [], seen = {};
+    SHOWN.forEach(function(r){
+      var a = chan(r[3], r[16]);
+      if(!seen[a]){ seen[a] = 1; keys.push(a); }
+      var uc = UNDS[r[0]][U_CODE];
+      if(uc.indexOf("IX") !== 0){          // 指數沒有個股報價管道
+        var b = chan(uc, r[16]);           // 權證與標的必為同一市場，已驗證無例外
+        if(!seen[b]){ seen[b] = 1; keys.push(b); }
+      }
+    });
+    var batches = [];
+    for(var i = 0; i < keys.length; i += MAX_CODES) batches.push(keys.slice(i, i + MAX_CODES));
+
+    Promise.all(batches.map(function(b){
+      return fetch(QUOTE_API + "?codes=" + encodeURIComponent(b.join(",")))
+        .then(function(res){
+          if(!res.ok) throw new Error("HTTP " + res.status);
+          return res.json();
+        });
+    })).then(function(parts){
+      var q = {};
+      parts.forEach(function(p){
+        (p.quotes || []).forEach(function(x){ q[x.code] = x; });
+      });
+      LIVE.quotes = q; LIVE.at = new Date(); LIVE.err = null;
+      var n = applyLive();
+      var hhmm = LIVE.at.toTimeString().slice(0,8);
+      setLiveStatus((inSession() ? "盤中即時" : "最後成交") +
+                    "　" + n + " 檔已更新　" + hhmm + "　來源 證交所 MIS", "ok");
+    }).catch(function(e){
+      LIVE.err = e;
+      setLiveStatus("報價暫時取不到：" + e.message + "（顯示收盤資料）", "err");
+    });
+  }
+
+  function setLive(on){
+    LIVE.on = on;
+    document.getElementById("livetoggle").setAttribute("aria-pressed", String(on));
+    if(LIVE.timer){ clearInterval(LIVE.timer); LIVE.timer = null; }
+    if(on){
+      pollQuotes();
+      LIVE.timer = setInterval(function(){ if(!document.hidden) pollQuotes(); }, POLL_MS);
+    }else{
+      LIVE.quotes = {};
+      setLiveStatus("已停用，顯示 " + D.date + " 收盤資料");
+      render();
     }
   }
 
@@ -638,7 +890,18 @@ footer a{color:var(--gold)}
     syncControls(); render();
   });
 
+  document.getElementById("livetoggle").addEventListener("click", function(){
+    setLive(!LIVE.on);
+  });
+
   syncControls();
   render();
+
+  // 交易時段自動開啟；收盤後維持靜態收盤資料，不必要地打上游沒有意義
+  if(inSession()){
+    setLive(true);
+  }else{
+    setLiveStatus("非交易時段，顯示 " + D.date + " 收盤資料。按「盤中即時」可手動取最後成交。");
+  }
 })();
 </script>
