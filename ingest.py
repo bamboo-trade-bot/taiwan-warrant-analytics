@@ -19,7 +19,13 @@ ISSUERS = ["元大", "統一", "凱基", "群益", "永豐", "富邦", "中信",
            "萬泰", "大慶", "口袋"]
 
 
-def fetch(url, tries=3, timeout=90):
+def fetch(url, tries=5, timeout=90):
+    """抓 JSON，失敗時以指數退避重試。
+
+    這些檔案有 3~40 MB，連線中途斷掉（IncompleteRead）偶爾會發生，而且實測
+    是瞬斷——同一個端點隔幾秒再抓就完全正常。重試太急會在上游還沒恢復時就
+    用完次數，讓無人看管的每日流程整個失敗、當天不會有部署。
+    """
     req = urllib.request.Request(url, headers={
         "User-Agent": UA,
         "Accept": "application/json",
@@ -35,7 +41,8 @@ def fetch(url, tries=3, timeout=90):
                 return json.loads(raw.decode("utf-8"))
         except Exception as e:
             last = e
-            time.sleep(2 * (i + 1))
+            if i < tries - 1:
+                time.sleep(min(2 ** (i + 1), 30))      # 2、4、8、16 秒
     raise RuntimeError("fetch failed " + url + ": " + str(last))
 
 
