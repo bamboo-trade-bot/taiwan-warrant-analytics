@@ -75,4 +75,8 @@ CREATE INDEX IF NOT EXISTS ix_adj_code ON warrant_adjustment(code, adj_date);
 CREATE INDEX IF NOT EXISTS ix_basic_code ON warrant_basic(code);
 CREATE INDEX IF NOT EXISTS ix_basic_und  ON warrant_basic(underlying, snapshot_date);
 CREATE INDEX IF NOT EXISTS ix_quote_und  ON warrant_quote(underlying, trade_date);
+-- 以 code 單獨查詢用。主鍵是 (trade_date, code)，code 在第二欄無法有效定位，
+-- underlying_map() 的相關子查詢會退化成掃完整個索引。資料累積到 14 個交易日
+-- （62 萬列）時實測 1,073 秒，建了這個索引後是 1.23 秒。
+CREATE INDEX IF NOT EXISTS ix_quote_code ON warrant_quote(code, trade_date);
 CREATE INDEX IF NOT EXISTS ix_metric_iv  ON warrant_metric(trade_date, iv);
