@@ -94,8 +94,29 @@ def snapshot(targets, trade_date, batch=BATCH, pause=PAUSE, progress=None):
     return out, stale
 
 
+CLOCK = "tse_2330"      # 探測市場日期用的參考標的，最不可能下市的那一檔
+
+
+def current_date(targets, n=30):
+    """MIS 當下回報的交易日期（YYYYMMDD）。
+
+    MIS 給的是「此刻」的快照：盤中是今天，收盤後到隔天開盤前則是最近一個
+    交易日。先問一次就能知道這批報價屬於哪一天。
+
+    取樣要夠多並附帶一個參考標的：待補清單裡可能整批都是已到期下市的權證，
+    那些回傳不含日期欄位。只抽少數幾檔就可能全部摸空而誤判為「無法判斷」，
+    結果照樣跑完整輪掃描——這個函式存在的目的就是避免那件事。
+    """
+    chans = [_channel(c, mk) for c, mk in targets[:n]]
+    chans.append(CLOCK)
+    for m in fetch_batch(chans):
+        if m.get("d"):
+            return m["d"]
+    return None
+
+
 def fill_missing_quotes(con, trade_date, market="OTC", progress=None):
-    """把當日缺買賣報價的權證用 MIS 補起來，回傳 (更新筆數, 略過筆數)。
+    """把當日缺買賣報價的權證用 MIS 補起來，回傳 (更新筆數, 略過筆數, 說明)。
 
     預設只處理上櫃。上市的買賣報價來自證交所每日收盤行情，那才是權威來源；
     上市之所以有缺，是造市商當天真的沒掛單，MIS 一樣抓不到，混用反而讓
@@ -107,7 +128,15 @@ def fill_missing_quotes(con, trade_date, market="OTC", progress=None):
            AND (bid IS NULL OR ask IS NULL)
     """, (trade_date, market))]
     if not targets:
-        return (0, 0)
+        return (0, 0, "沒有需要補的權證")
+
+    # 先用五個代號問一次日期再決定要不要掃。若在盤中執行，MIS 給的是「今天」
+    # 的即時報價，和目標交易日對不起來，整批都會被日期防護丟掉——那等於對
+    # 一個非正式 API 打上數千次完全無用的請求，還會讓流程多跑二十幾分鐘。
+    want = trade_date.replace("-", "")
+    now = current_date(targets)
+    if now and now != want:
+        return (0, 0, "MIS 目前回報 %s、目標為 %s（多半是在盤中執行），略過掃描" % (now, want))
 
     quotes, stale = snapshot(targets, trade_date, progress=progress)
     con.executemany("""
@@ -117,4 +146,4 @@ def fill_missing_quotes(con, trade_date, market="OTC", progress=None):
     """, [(q["bid"], q["bid_size"], q["ask"], q["ask_size"], trade_date, q["code"])
           for q in quotes])
     con.commit()
-    return (len(quotes), stale)
+    return (len(quotes), stale, None)

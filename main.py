@@ -52,8 +52,12 @@ def fill_otc_quotes(con, trade_date):
             print("    掃描中 %5d/%d，已取得 %5d 筆報價" % (done, total, got))
             state["next"] = done + 2500
     try:
-        n, stale = mis.fill_missing_quotes(con, trade_date, "OTC", progress=show)
-        print("  MIS 補上櫃買賣報價 %5d 筆（日期不符略過 %d）" % (n, stale))
+        n, stale, note = mis.fill_missing_quotes(con, trade_date, "OTC", progress=show)
+        if note:
+            print("  MIS 未掃描：%s" % note)
+            print("    上櫃權證本次沿用收盤價，下次收盤後執行即會補齊")
+        else:
+            print("  MIS 補上櫃買賣報價 %5d 筆（日期不符略過 %d）" % (n, stale))
     except Exception as e:
         print("  MIS 掃描失敗，上櫃將沿用收盤價：%s" % e)
 
